@@ -1,0 +1,474 @@
+// ============================================================================
+//  Cellshading-Dominica.dctl
+//  Killer7-style cel shading for live-action footage in DaVinci Resolve.
+//
+//  Pipeline:
+//    1. Kuwahara flatten   - removes texture/noise while keeping edges hard
+//    2. Exposure/contrast  - shapes the tone measure before thresholding
+//    3. Shadow cut         - everything below a threshold becomes flat ink
+//    4. Shadow pattern     - optional halftone / hatching near the shadow edge
+//    5. Lit tone bands     - remaining tones are posterised into N flat levels
+//    6. Highlight blowout  - top end clips to (near) white
+//    7. Colour             - palette snap, monochrome or single-accent modes
+//    8. Ink outlines       - Sobel edge detection
+//    9. Output             - black/white point, saturation, mix
+//
+//  Input expected: display-referred Rec.709 (gamma 2.4). Place this after a
+//  CST / LUT that converts your camera log to Rec.709.
+//  Hue sliders are in degrees: 0 red, 60 yellow, 120 green, 180 cyan,
+//  240 blue, 300 magenta.
+// ============================================================================
+
+// ============================================================================
+//  MAIN CONTROLS - the sliders with the biggest effect on the final image
+// ============================================================================
+DEFINE_UI_PARAMS(shadowThresh,    "Shadow Threshold",                  DCTLUI_SLIDER_FLOAT, 0.30,  0.0,   1.0,   0.005)
+DEFINE_UI_PARAMS(shadowStyle,     "Shadow Color",                      DCTLUI_COMBO_BOX,    0, { SH_BLACK, SH_SOURCE, SH_CRIMSON, SH_NAVY, SH_VIOLET, SH_CUSTOM }, { "Ink Black", "Source Hue", "Crimson", "Navy", "Violet", "Custom RGB" })
+DEFINE_UI_PARAMS(tones,           "Tone Count",                        DCTLUI_SLIDER_INT,   2,     1,     8,     1)
+DEFINE_UI_PARAMS(exposure,        "Exposure",                          DCTLUI_SLIDER_FLOAT, 0.0,  -3.0,   3.0,   0.01)
+DEFINE_UI_PARAMS(contrast,        "Contrast",                          DCTLUI_SLIDER_FLOAT, 1.25,  0.5,   3.0,   0.01)
+DEFINE_UI_PARAMS(colorMode,       "Color Mode",                        DCTLUI_COMBO_BOX,    0, { CM_PALETTE, CM_MONO, CM_ACCENT }, { "Snapped Palette", "Monochrome Tint", "Single Accent Color" })
+DEFINE_UI_PARAMS(satAmt,          "Saturation",                        DCTLUI_SLIDER_FLOAT, 1.3,   0.0,   3.0,   0.01)
+DEFINE_UI_PARAMS(highlightThresh, "Highlight Threshold",               DCTLUI_SLIDER_FLOAT, 0.85,  0.0,   1.0,   0.005)
+DEFINE_UI_PARAMS(hiAmount,        "Highlight Blowout",                 DCTLUI_SLIDER_FLOAT, 1.0,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(flatRadius,      "Flatten Radius",                    DCTLUI_SLIDER_INT,   2,     0,     6,     1)
+DEFINE_UI_PARAMS(stabTone,        "Flicker Reduction",                 DCTLUI_SLIDER_FLOAT, 0.5,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(drawLines,       "Outlines",                          DCTLUI_CHECK_BOX,    1)
+DEFINE_UI_PARAMS(lineThresh,      "Outline Threshold",                 DCTLUI_SLIDER_FLOAT, 0.12,  0.01,  1.0,   0.005)
+DEFINE_UI_PARAMS(lineWidth,       "Outline Width",                     DCTLUI_SLIDER_FLOAT, 1.0,   0.5,   6.0,   0.05)
+DEFINE_UI_PARAMS(patternType,     "Shadow Pattern",                    DCTLUI_COMBO_BOX,    0, { PT_NONE, PT_HALFTONE, PT_HATCH, PT_CROSSHATCH }, { "None", "Halftone Dots", "Hatching", "Cross-Hatching" })
+DEFINE_UI_PARAMS(mixAmt,          "Effect Mix",                        DCTLUI_SLIDER_FLOAT, 1.0,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(viewMode,        "View",                              DCTLUI_COMBO_BOX,    0, { VM_FINAL, VM_SHADOW, VM_BANDS, VM_LINES, VM_FLAT }, { "Final", "Shadow Matte", "Tone Bands", "Outline Matte", "Flattened Source" })
+
+// ============================================================================
+//  ADVANCED - grouped by what they affect
+// ============================================================================
+
+// --- Tone: how brightness is measured and split into bands ---------------------
+DEFINE_UI_PARAMS(secTone, "---------- ADVANCED TONE ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(toneMeasure,     "Tone Measure",                DCTLUI_COMBO_BOX,    0, { TM_LUMA, TM_MAXRGB, TM_AVERAGE }, { "Luma", "Max RGB", "RGB Average" })
+DEFINE_UI_PARAMS(pivot,           "Tone Contrast Pivot",         DCTLUI_SLIDER_FLOAT, 0.42,  0.1,   0.9,   0.01)
+DEFINE_UI_PARAMS(toneFloor,       "Tone Darkest Lit Level",      DCTLUI_SLIDER_FLOAT, 0.40,  0.0,   1.0,   0.005)
+DEFINE_UI_PARAMS(toneCeil,        "Tone Brightest Lit Level",    DCTLUI_SLIDER_FLOAT, 0.72,  0.0,   1.0,   0.005)
+DEFINE_UI_PARAMS(toneBias,        "Tone Band Bias",              DCTLUI_SLIDER_FLOAT, 1.0,   0.25,  4.0,   0.01)
+DEFINE_UI_PARAMS(toneSoft,        "Tone Band Edge Softness",     DCTLUI_SLIDER_FLOAT, 0.015, 0.0,   0.2,   0.001)
+
+// --- Shadow: look of the ink areas ------------------------------------------------
+DEFINE_UI_PARAMS(secShadow, "---------- ADVANCED SHADOW ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(shadowLevel,     "Shadow Level",                DCTLUI_SLIDER_FLOAT, 0.03,  0.0,   0.5,   0.005)
+DEFINE_UI_PARAMS(shadowSoft,      "Shadow Edge Softness",        DCTLUI_SLIDER_FLOAT, 0.015, 0.0,   0.2,   0.001)
+DEFINE_UI_PARAMS(shadowR,         "Shadow Custom R",             DCTLUI_SLIDER_FLOAT, 0.10,  0.0,   1.0,   0.005)
+DEFINE_UI_PARAMS(shadowG,         "Shadow Custom G",             DCTLUI_SLIDER_FLOAT, 0.02,  0.0,   1.0,   0.005)
+DEFINE_UI_PARAMS(shadowB,         "Shadow Custom B",             DCTLUI_SLIDER_FLOAT, 0.05,  0.0,   1.0,   0.005)
+
+// --- Highlight: the blown-out top end ---------------------------------------------
+DEFINE_UI_PARAMS(secHighlight, "---------- ADVANCED HIGHLIGHT ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hiLevel,         "Highlight Level",             DCTLUI_SLIDER_FLOAT, 0.97,  0.5,   1.0,   0.005)
+DEFINE_UI_PARAMS(hiSoft,          "Highlight Edge Softness",     DCTLUI_SLIDER_FLOAT, 0.015, 0.0,   0.2,   0.001)
+DEFINE_UI_PARAMS(hiColorKeep,     "Highlight Color Keep",        DCTLUI_SLIDER_FLOAT, 0.15,  0.0,   1.0,   0.01)
+
+// --- Color: palette, mono and accent modes ----------------------------------------
+DEFINE_UI_PARAMS(secColor, "---------- ADVANCED COLOR ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(hueShift,        "Color Hue Shift",             DCTLUI_SLIDER_FLOAT, 0.0, -180.0, 180.0, 1.0)
+DEFINE_UI_PARAMS(hueSteps,        "Color Hue Steps - 0 Off",     DCTLUI_SLIDER_INT,   12,    0,     36,    1)
+DEFINE_UI_PARAMS(hueSnap,         "Color Hue Snap Amount",       DCTLUI_SLIDER_FLOAT, 0.8,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(satSteps,        "Color Sat Steps - 0 Off",     DCTLUI_SLIDER_INT,   3,     0,     8,     1)
+DEFINE_UI_PARAMS(stepSoft,        "Color Step Softness",         DCTLUI_SLIDER_FLOAT, 0.1,   0.0,   0.5,   0.01)
+DEFINE_UI_PARAMS(monoHue,         "Color Mono Hue",              DCTLUI_SLIDER_FLOAT, 35.0,  0.0,   360.0, 1.0)
+DEFINE_UI_PARAMS(monoSat,         "Color Mono Saturation",       DCTLUI_SLIDER_FLOAT, 0.25,  0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(accentHue,       "Color Accent Hue",            DCTLUI_SLIDER_FLOAT, 0.0,   0.0,   360.0, 1.0)
+DEFINE_UI_PARAMS(accentWidth,     "Color Accent Width",          DCTLUI_SLIDER_FLOAT, 25.0,  1.0,   90.0,  0.5)
+DEFINE_UI_PARAMS(accentRest,      "Color Non-Accent Saturation", DCTLUI_SLIDER_FLOAT, 0.0,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(tintHue,         "Color Lit Tint Hue",          DCTLUI_SLIDER_FLOAT, 45.0,  0.0,   360.0, 1.0)
+DEFINE_UI_PARAMS(tintAmt,         "Color Lit Tint Amount",       DCTLUI_SLIDER_FLOAT, 0.0,   0.0,   1.0,   0.01)
+
+// --- Outline: ink line detail -------------------------------------------------------
+DEFINE_UI_PARAMS(secOutline, "---------- ADVANCED OUTLINE ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(lineStrength,    "Outline Strength",            DCTLUI_SLIDER_FLOAT, 1.0,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(lineSoft,        "Outline Softness",            DCTLUI_SLIDER_FLOAT, 0.5,   0.0,   2.0,   0.01)
+DEFINE_UI_PARAMS(lineColor,       "Outline Color",               DCTLUI_COMBO_BOX,    0, { LC_SHADOW, LC_BLACK, LC_WHITE, LC_INVERT }, { "Same as Shadow", "Black", "White", "Inverted" })
+DEFINE_UI_PARAMS(lineLitOnly,     "Outline Lit Areas Only",      DCTLUI_CHECK_BOX,    0)
+DEFINE_UI_PARAMS(linePreSmooth,   "Outline Pre-Smooth",          DCTLUI_CHECK_BOX,    1)
+
+// --- Pattern: halftone / hatching inside the shadow edge ---------------------------
+DEFINE_UI_PARAMS(secPattern, "---------- ADVANCED PATTERN ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(patternRange,    "Pattern Range",               DCTLUI_SLIDER_FLOAT, 0.10,  0.0,   0.5,   0.005)
+DEFINE_UI_PARAMS(patternSize,     "Pattern Cell Size",           DCTLUI_SLIDER_FLOAT, 8.0,   2.0,   40.0,  0.5)
+DEFINE_UI_PARAMS(patternAngle,    "Pattern Angle",               DCTLUI_SLIDER_FLOAT, 45.0,  0.0,   180.0, 1.0)
+
+// --- Flatten: painted-patch smoothing -----------------------------------------------
+DEFINE_UI_PARAMS(secFlatten, "---------- ADVANCED FLATTEN ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(flatSpread,      "Flatten Spread",              DCTLUI_SLIDER_FLOAT, 1.0,   1.0,   4.0,   0.1)
+DEFINE_UI_PARAMS(flatSharp,       "Flatten Edge Sharpness",      DCTLUI_SLIDER_FLOAT, 16.0,  0.5,   32.0,  0.1)
+
+// --- Stability: frame-to-frame flicker ----------------------------------------------
+DEFINE_UI_PARAMS(secStability, "---------- ADVANCED STABILITY ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(stabColor,       "Stability Color Smoothing",   DCTLUI_SLIDER_FLOAT, 0.3,   0.0,   1.0,   0.01)
+DEFINE_UI_PARAMS(stabRadius,      "Stability Smoothing Radius",  DCTLUI_SLIDER_FLOAT, 6.0,   1.0,   30.0,  0.5)
+
+// --- Output: final levels -----------------------------------------------------------
+DEFINE_UI_PARAMS(secOutput, "---------- ADVANCED OUTPUT ----------", DCTLUI_CHECK_BOX, 0)
+DEFINE_UI_PARAMS(outBlack,        "Output Black Point",          DCTLUI_SLIDER_FLOAT, 0.0,   0.0,   0.5,   0.005)
+DEFINE_UI_PARAMS(outWhite,        "Output White Point",          DCTLUI_SLIDER_FLOAT, 1.0,   0.5,   1.0,   0.005)
+DEFINE_UI_PARAMS(outSat,          "Output Saturation",           DCTLUI_SLIDER_FLOAT, 1.0,   0.0,   2.0,   0.01)
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+__DEVICE__ float luma(float3 c) {
+    return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
+}
+
+__DEVICE__ float lerpf(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+__DEVICE__ float3 lerp3(float3 a, float3 b, float t) {
+    return make_float3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+}
+
+__DEVICE__ float sstep(float e0, float e1, float x) {
+    if (e1 <= e0) return x >= e0 ? 1.0f : 0.0f;
+    float t = _saturatef((x - e0) / (e1 - e0));
+    return t * t * (3.0f - 2.0f * t);
+}
+
+__DEVICE__ float wrap01(float x) {
+    return x - _floor(x);
+}
+
+__DEVICE__ float hueDist(float a, float b) {
+    float d = _fabs(a - b);
+    return _fminf(d, 1.0f - d);
+}
+
+__DEVICE__ float3 fetch(__TEXTURE__ texR, __TEXTURE__ texG, __TEXTURE__ texB, int x, int y, int w, int h) {
+    x = x < 0 ? 0 : (x > w - 1 ? w - 1 : x);
+    y = y < 0 ? 0 : (y > h - 1 ? h - 1 : y);
+    return make_float3(_tex2D(texR, x, y), _tex2D(texG, x, y), _tex2D(texB, x, y));
+}
+
+__DEVICE__ float toneOf(float3 c, int mode) {
+    if (mode == 1) return _fmaxf(c.x, _fmaxf(c.y, c.z));
+    if (mode == 2) return (c.x + c.y + c.z) / 3.0f;
+    return luma(c);
+}
+
+__DEVICE__ float3 rgb2hsv(float3 c) {
+    float mx = _fmaxf(c.x, _fmaxf(c.y, c.z));
+    float mn = _fminf(c.x, _fminf(c.y, c.z));
+    float d  = mx - mn;
+    float h  = 0.0f;
+    if (d > 1e-6f) {
+        if (mx == c.x)      h = (c.y - c.z) / d;
+        else if (mx == c.y) h = 2.0f + (c.z - c.x) / d;
+        else                h = 4.0f + (c.x - c.y) / d;
+        h /= 6.0f;
+        if (h < 0.0f) h += 1.0f;
+    }
+    float s = mx > 1e-6f ? d / mx : 0.0f;
+    return make_float3(h, s, mx);
+}
+
+__DEVICE__ float3 hsv2rgb(float h, float s, float v) {
+    float r = _saturatef(_fabs(h * 6.0f - 3.0f) - 1.0f);
+    float g = _saturatef(2.0f - _fabs(h * 6.0f - 2.0f));
+    float b = _saturatef(2.0f - _fabs(h * 6.0f - 4.0f));
+    return make_float3(v * ((r - 1.0f) * s + 1.0f),
+                       v * ((g - 1.0f) * s + 1.0f),
+                       v * ((b - 1.0f) * s + 1.0f));
+}
+
+// Build a flat colour with the given hue/sat whose Rec.709 luma equals targetY.
+// If that overflows the gamut, desaturate toward grey until it fits.
+__DEVICE__ float3 colorize(float h, float s, float targetY) {
+    targetY = _saturatef(targetY);
+    float3 c = hsv2rgb(h, s, 1.0f);
+    float k = targetY / _fmaxf(luma(c), 1e-4f);
+    c = make_float3(c.x * k, c.y * k, c.z * k);
+    float m = _fmaxf(c.x, _fmaxf(c.y, c.z));
+    if (m > 1.0f) {
+        float f = (1.0f - targetY) / _fmaxf(m - targetY, 1e-4f);
+        c = make_float3(targetY + (c.x - targetY) * f,
+                        targetY + (c.y - targetY) * f,
+                        targetY + (c.z - targetY) * f);
+    }
+    return c;
+}
+
+// Soft rounding to `steps` levels. w = 0 is a hard step; w = 0.5 is almost continuous.
+// Values sitting on a step boundary blend instead of flipping, which avoids flicker.
+__DEVICE__ float softQuant(float x, float steps, float w) {
+    float v = x * steps;
+    float i = _floor(v);
+    float fr = v - i;
+    w = _fminf(_fmaxf(w, 1e-4f), 0.5f);
+    return (i + sstep(0.5f - w, 0.5f + w, fr)) / steps;
+}
+
+// Wide, cheap blur (centre + two rings of 8 samples) used as a stable reference
+// for threshold decisions. Grain can't flip a pixel across a threshold when the
+// decision is made on the neighbourhood average.
+__DEVICE__ float3 stableBlur(__TEXTURE__ texR, __TEXTURE__ texG, __TEXTURE__ texB,
+                             int px, int py, int w, int h, float radius) {
+    float3 c = fetch(texR, texG, texB, px, py, w, h);
+    float sr = c.x, sg = c.y, sb = c.z, wsum = 1.0f;
+    for (int k = 0; k < 8; k++) {
+        float a = (float)k * 0.785398f;
+        float ca = _cosf(a), sa = _sinf(a);
+        float3 c1 = fetch(texR, texG, texB, px + (int)(ca * radius * 0.5f), py + (int)(sa * radius * 0.5f), w, h);
+        float3 c2 = fetch(texR, texG, texB, px + (int)(ca * radius), py + (int)(sa * radius), w, h);
+        sr += c1.x * 0.8f + c2.x * 0.5f;
+        sg += c1.y * 0.8f + c2.y * 0.5f;
+        sb += c1.z * 0.8f + c2.z * 0.5f;
+        wsum += 1.3f;
+    }
+    return make_float3(sr / wsum, sg / wsum, sb / wsum);
+}
+
+// Smooth 4-quadrant Kuwahara filter. Instead of hard-picking the least-varying
+// quadrant (which jumps between quadrants frame to frame and flickers), each
+// quadrant is weighted by (minStdDev / stdDev)^sharpness, so similar quadrants blend.
+// Flattens skin/fabric texture into painted-looking patches with crisp edges.
+__DEVICE__ float3 kuwahara(__TEXTURE__ texR, __TEXTURE__ texG, __TEXTURE__ texB,
+                           int px, int py, int w, int h, int radius, int stride, float sharp) {
+    float3 m0 = make_float3(0.0f, 0.0f, 0.0f), m1 = m0, m2 = m0, m3 = m0;
+    float s0 = 0.0f, s1 = 0.0f, s2 = 0.0f, s3 = 0.0f;
+    for (int q = 0; q < 4; q++) {
+        int sx = (q & 1) ? 1 : -1;
+        int sy = (q & 2) ? 1 : -1;
+        float3 sum = make_float3(0.0f, 0.0f, 0.0f);
+        float sumY = 0.0f, sumY2 = 0.0f;
+        for (int j = 0; j <= radius; j++) {
+            for (int i = 0; i <= radius; i++) {
+                float3 c = fetch(texR, texG, texB, px + sx * i * stride, py + sy * j * stride, w, h);
+                float y = luma(c);
+                sum = make_float3(sum.x + c.x, sum.y + c.y, sum.z + c.z);
+                sumY += y;
+                sumY2 += y * y;
+            }
+        }
+        float n = (float)((radius + 1) * (radius + 1));
+        float meanY = sumY / n;
+        float sd = _sqrtf(_fmaxf(sumY2 / n - meanY * meanY, 0.0f)) * 255.0f;
+        float3 mean = make_float3(sum.x / n, sum.y / n, sum.z / n);
+        if (q == 0)      { m0 = mean; s0 = sd; }
+        else if (q == 1) { m1 = mean; s1 = sd; }
+        else if (q == 2) { m2 = mean; s2 = sd; }
+        else             { m3 = mean; s3 = sd; }
+    }
+    // 0.5 (in 8-bit units) keeps near-flat areas from amplifying tiny differences
+    float sMin = _fminf(_fminf(s0, s1), _fminf(s2, s3)) + 0.5f;
+    float w0 = _powf(sMin / (s0 + 0.5f), sharp);
+    float w1 = _powf(sMin / (s1 + 0.5f), sharp);
+    float w2 = _powf(sMin / (s2 + 0.5f), sharp);
+    float w3 = _powf(sMin / (s3 + 0.5f), sharp);
+    float ws = w0 + w1 + w2 + w3;
+    return make_float3((m0.x * w0 + m1.x * w1 + m2.x * w2 + m3.x * w3) / ws,
+                       (m0.y * w0 + m1.y * w1 + m2.y * w2 + m3.y * w3) / ws,
+                       (m0.z * w0 + m1.z * w1 + m2.z * w2 + m3.z * w3) / ws);
+}
+
+// Tone at a point, optionally averaged over a 2x2 block to tame grain for edge detection.
+__DEVICE__ float edgeTap(__TEXTURE__ texR, __TEXTURE__ texG, __TEXTURE__ texB,
+                         int x, int y, int w, int h, int s, int smooth, int tmode) {
+    float t = toneOf(fetch(texR, texG, texB, x, y, w, h), tmode);
+    if (smooth) {
+        t += toneOf(fetch(texR, texG, texB, x + s, y,     w, h), tmode);
+        t += toneOf(fetch(texR, texG, texB, x,     y + s, w, h), tmode);
+        t += toneOf(fetch(texR, texG, texB, x + s, y + s, w, h), tmode);
+        t *= 0.25f;
+    }
+    return t;
+}
+
+// Screen-space shading pattern. density 0 = no lit marks, 1 = fully lit.
+// Returns 1 where the lit colour should show through.
+__DEVICE__ float shadePattern(int type, float px, float py, float cell, float angleDeg, float density) {
+    float a = angleDeg * 3.14159265f / 180.0f;
+    float ca = _cosf(a), sa = _sinf(a);
+    float u = (px * ca - py * sa) / cell;
+    float v = (px * sa + py * ca) / cell;
+    float aa = 1.0f / cell;  // ~1 pixel anti-aliasing
+
+    if (type == 1) {  // halftone dots
+        float fu = wrap01(u) - 0.5f;
+        float fv = wrap01(v) - 0.5f;
+        float dist = _sqrtf(fu * fu + fv * fv);
+        float radius = _sqrtf(density) * 0.7072f;
+        return 1.0f - sstep(radius - aa, radius + aa, dist);
+    }
+
+    // hatching: stripe width proportional to density
+    float fu = _fabs(wrap01(u) - 0.5f) * 2.0f;  // 0 at stripe centre, 1 at edge
+    float lines = 1.0f - sstep(density - aa, density + aa, fu);
+    if (type == 3) {  // cross-hatch: second set at 90 degrees, half the density each
+        float fv = _fabs(wrap01(v) - 0.5f) * 2.0f;
+        float d2 = density * 0.5f;
+        float l1 = 1.0f - sstep(d2 - aa, d2 + aa, fu);
+        float l2 = 1.0f - sstep(d2 - aa, d2 + aa, fv);
+        lines = _fmaxf(l1, l2);
+    }
+    return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, __TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB)
+{
+    float3 src = fetch(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height);
+
+    // Keep the look consistent between HD / UHD / etc.
+    float resScale = (float)p_Width / 1920.0f;
+    int stride = (int)_fmaxf(1.0f, _floor(resScale * flatSpread + 0.5f));
+
+    // 1. Flatten
+    float3 flat = flatRadius > 0
+        ? kuwahara(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height, flatRadius, stride, flatSharp)
+        : src;
+
+    // 1b. Stability reference: tone and colour decisions lean on a wide blur
+    float3 stable = flat;
+    if (stabTone > 0.0f || stabColor > 0.0f) {
+        stable = stableBlur(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height, stabRadius * resScale);
+    }
+    float3 toneSrc  = lerp3(flat, stable, stabTone);
+    float3 colorSrc = lerp3(flat, stable, stabColor);
+    if (viewMode == VM_FLAT) return toneSrc;
+
+    // 2. Exposure / contrast on the chosen tone measure
+    int tmode = toneMeasure == TM_MAXRGB ? 1 : (toneMeasure == TM_AVERAGE ? 2 : 0);
+    float expGain = _powf(2.0f, exposure);
+    float Y = toneOf(toneSrc, tmode) * expGain;
+    Y = pivot * _powf(_fmaxf(Y, 0.0f) / pivot, contrast);
+    Y = _saturatef(Y);
+
+    // 3. Shadow matte (1 = lit, 0 = shadow)
+    float litMask = sstep(shadowThresh - shadowSoft, shadowThresh + shadowSoft, Y);
+    if (viewMode == VM_SHADOW) return make_float3(litMask, litMask, litMask);
+
+    // 5. Posterise the lit range into N equal-width bands with soft edges
+    float range = _fmaxf(highlightThresh - shadowThresh, 1e-3f);
+    float t = _powf(_saturatef((Y - shadowThresh) / range), toneBias);
+    float qt = 0.5f;
+    if (tones > 1) {
+        float N = (float)tones;
+        float v = t * N - 0.5f;
+        float i = _floor(v);
+        float fr = v - i;
+        float w = _fminf(_fmaxf(toneSoft * N / range, 1e-4f), 0.5f);
+        float level = i + sstep(0.5f - w, 0.5f + w, fr);
+        level = _fminf(_fmaxf(level, 0.0f), N - 1.0f);
+        qt = level / (N - 1.0f);
+    }
+    float bandY = lerpf(toneFloor, toneCeil, qt);
+
+    // 7. Colour
+    float3 hsv = rgb2hsv(colorSrc);
+    float hue = wrap01(hsv.x + hueShift / 360.0f);
+    float sat = _saturatef(hsv.y * satAmt);
+
+    if (colorMode == CM_MONO) {
+        hue = monoHue / 360.0f;
+        sat = monoSat;
+    } else {
+        if (colorMode == CM_ACCENT) {
+            float d = hueDist(hue, accentHue / 360.0f);
+            float wdt = accentWidth / 360.0f;
+            float keep = 1.0f - sstep(wdt * 0.6f, wdt, d);
+            sat = sat * lerpf(accentRest, 1.0f, keep);
+        }
+        if (hueSteps > 0) {
+            float hs = (float)hueSteps;
+            float hq = softQuant(hue, hs, stepSoft);
+            hue = wrap01(hue + (hq - hue) * hueSnap);
+        }
+        if (satSteps > 0) {
+            float ss = (float)satSteps;
+            sat = _saturatef(softQuant(sat, ss, stepSoft));
+        }
+    }
+
+    float3 lit = colorize(hue, sat, bandY);
+    if (tintAmt > 0.0f) lit = lerp3(lit, colorize(tintHue / 360.0f, 1.0f, bandY), tintAmt);
+
+    // 3b. Shadow colour
+    float3 shadowCol;
+    if (shadowStyle == SH_SOURCE)       shadowCol = colorize(hue, sat, shadowLevel);
+    else if (shadowStyle == SH_CRIMSON) shadowCol = colorize(0.985f, 0.9f, shadowLevel);
+    else if (shadowStyle == SH_NAVY)    shadowCol = colorize(0.62f,  0.8f, shadowLevel);
+    else if (shadowStyle == SH_VIOLET)  shadowCol = colorize(0.76f,  0.7f, shadowLevel);
+    else if (shadowStyle == SH_CUSTOM)  shadowCol = make_float3(shadowR, shadowG, shadowB);
+    else                                shadowCol = make_float3(shadowLevel, shadowLevel, shadowLevel);
+
+    // 4. Shadow pattern: lit marks inside the band just below the threshold
+    float patMask = 0.0f;
+    if (patternType != PT_NONE && patternRange > 0.0f) {
+        int ptype = patternType == PT_HALFTONE ? 1 : (patternType == PT_HATCH ? 2 : 3);
+        float density = _saturatef((Y - (shadowThresh - patternRange)) / patternRange);
+        float cell = _fmaxf(patternSize * resScale, 1.0f);
+        patMask = shadePattern(ptype, (float)p_X, (float)p_Y, cell, patternAngle, density)
+                  * (density > 0.0f ? 1.0f : 0.0f) * (1.0f - litMask);
+    }
+    float3 patCol = colorize(hue, sat, toneFloor);
+    if (tintAmt > 0.0f) patCol = lerp3(patCol, colorize(tintHue / 360.0f, 1.0f, toneFloor), tintAmt);
+
+    if (viewMode == VM_BANDS) {
+        float b = lerpf(shadowLevel, bandY, litMask);
+        b = lerpf(b, toneFloor, patMask);
+        return make_float3(b, b, b);
+    }
+
+    float3 col = lerp3(shadowCol, lit, litMask);
+    col = lerp3(col, patCol, patMask);
+
+    // 6. Highlight blowout
+    float hiMask = sstep(highlightThresh - hiSoft, highlightThresh + hiSoft, Y) * hiAmount;
+    float3 hiCol = colorize(hue, sat * hiColorKeep, hiLevel);
+    col = lerp3(col, hiCol, hiMask);
+
+    // 8. Ink outlines (Sobel on source)
+    float lineMask = 0.0f;
+    if (drawLines || viewMode == VM_LINES) {
+        int d = (int)_fmaxf(1.0f, _floor(lineWidth * resScale + 0.5f));
+        int x = p_X, y = p_Y, W = p_Width, H = p_Height;
+        int s = (int)_fmaxf(1.0f, _floor(resScale + 0.5f));
+        float tl = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y - d, W, H, s, linePreSmooth, tmode);
+        float tc = edgeTap(p_TexR, p_TexG, p_TexB, x,     y - d, W, H, s, linePreSmooth, tmode);
+        float tr = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y - d, W, H, s, linePreSmooth, tmode);
+        float ml = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y,     W, H, s, linePreSmooth, tmode);
+        float mr = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y,     W, H, s, linePreSmooth, tmode);
+        float bl = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y + d, W, H, s, linePreSmooth, tmode);
+        float bc = edgeTap(p_TexR, p_TexG, p_TexB, x,     y + d, W, H, s, linePreSmooth, tmode);
+        float br = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y + d, W, H, s, linePreSmooth, tmode);
+        float gx = (tr + 2.0f * mr + br) - (tl + 2.0f * ml + bl);
+        float gy = (bl + 2.0f * bc + br) - (tl + 2.0f * tc + tr);
+        float mag = _sqrtf(gx * gx + gy * gy) * 0.25f * expGain;
+        lineMask = sstep(lineThresh, lineThresh * (1.0f + lineSoft) + 1e-4f, mag);
+        if (lineLitOnly) lineMask *= litMask;
+    }
+    if (viewMode == VM_LINES) return make_float3(1.0f - lineMask, 1.0f - lineMask, 1.0f - lineMask);
+    if (drawLines) {
+        float3 inkCol;
+        if (lineColor == LC_BLACK)       inkCol = make_float3(0.0f, 0.0f, 0.0f);
+        else if (lineColor == LC_WHITE)  inkCol = make_float3(1.0f, 1.0f, 1.0f);
+        else if (lineColor == LC_INVERT) inkCol = make_float3(1.0f - col.x, 1.0f - col.y, 1.0f - col.z);
+        else                             inkCol = shadowCol;
+        col = lerp3(col, inkCol, lineMask * lineStrength);
+    }
+
+    // 9. Output
+    if (outSat != 1.0f) {
+        float l = luma(col);
+        col = make_float3(l + (col.x - l) * outSat, l + (col.y - l) * outSat, l + (col.z - l) * outSat);
+    }
+    float span = outWhite - outBlack;
+    col = make_float3(outBlack + _saturatef(col.x) * span,
+                      outBlack + _saturatef(col.y) * span,
+                      outBlack + _saturatef(col.z) * span);
+
+    return lerp3(src, col, mixAmt);
+}
