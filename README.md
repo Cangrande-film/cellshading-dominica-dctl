@@ -77,3 +77,7 @@ To reduce it:
 - Raise **Flicker Reduction**.
 - Put temporal noise reduction before this node.
 - Add Resolve's **Deflicker** effect after it.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Free to use, modify and share, including commercially.
