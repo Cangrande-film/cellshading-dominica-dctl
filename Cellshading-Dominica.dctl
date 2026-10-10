@@ -20,6 +20,13 @@
 // ============================================================================
 
 // ============================================================================
+//  PRESET - picks a saved look. Anything other than Custom ignores every
+//  slider except Exposure, Effect Mix and View. Presets live further down in
+//  this file: see BUILT-IN PRESETS and USER PRESETS.
+// ============================================================================
+DEFINE_UI_PARAMS(preset,          "Preset",                            DCTLUI_COMBO_BOX,    0, { PR_CUSTOM, PR_K7, PR_NOIR, PR_CRIMSON, PR_COMIC, PR_PEN, PR_SEPIA, PR_NAVY, PR_POP, PR_SOFT, PR_USER1, PR_USER2, PR_USER3, PR_USER4, PR_USER5, PR_USER6 }, { "Custom - Use Sliders", "Killer7 Classic", "Stark Noir", "Crimson Ink", "Halftone Comic", "Pen and Ink", "Sepia Woodcut", "Navy Night", "Pop Palette", "Soft Painted", "User 1", "User 2", "User 3", "User 4", "User 5", "User 6" })
+
+// ============================================================================
 //  MAIN CONTROLS - the sliders with the biggest effect on the final image
 // ============================================================================
 DEFINE_UI_PARAMS(shadowThresh,    "Shadow Threshold",                  DCTLUI_SLIDER_FLOAT, 0.30,  0.0,   1.0,   0.005)
@@ -314,111 +321,478 @@ __DEVICE__ float shadePattern(int type, float px, float py, float cell, float an
 }
 
 // ---------------------------------------------------------------------------
+// Presets
+// Combo values in presets are the item index, counting from 0 in the order the
+// combo lists them (e.g. colorMode 0 Snapped Palette, 1 Monochrome Tint, 2 Single Accent).
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    float shadowThresh;
+    int shadowStyle;
+    int tones;
+    float contrast;
+    int colorMode;
+    float satAmt;
+    float highlightThresh;
+    float hiAmount;
+    int flatRadius;
+    float stabTone;
+    int drawLines;
+    float lineThresh;
+    float lineWidth;
+    int patternType;
+    int toneMeasure;
+    float pivot;
+    float toneFloor;
+    float toneCeil;
+    float toneBias;
+    float toneSoft;
+    float shadowLevel;
+    float shadowSoft;
+    float shadowR;
+    float shadowG;
+    float shadowB;
+    float hiLevel;
+    float hiSoft;
+    float hiColorKeep;
+    float hueShift;
+    int hueSteps;
+    float hueSnap;
+    int satSteps;
+    float stepSoft;
+    float monoHue;
+    float monoSat;
+    float accentHue;
+    float accentWidth;
+    float accentRest;
+    float tintHue;
+    float tintAmt;
+    float lineStrength;
+    float lineSoft;
+    int lineColor;
+    int lineLitOnly;
+    int linePreSmooth;
+    float patternRange;
+    float patternSize;
+    float patternAngle;
+    float flatSpread;
+    float flatSharp;
+    float stabColor;
+    float stabRadius;
+    float outBlack;
+    float outWhite;
+    float outSat;
+} Cfg;
+
+__DEVICE__ Cfg cfgDefaults() {
+    Cfg P;
+    P.shadowThresh = 0.30f;
+    P.shadowStyle = 0;
+    P.tones = 2;
+    P.contrast = 1.25f;
+    P.colorMode = 0;
+    P.satAmt = 1.3f;
+    P.highlightThresh = 0.85f;
+    P.hiAmount = 1.0f;
+    P.flatRadius = 2;
+    P.stabTone = 0.5f;
+    P.drawLines = 1;
+    P.lineThresh = 0.12f;
+    P.lineWidth = 1.0f;
+    P.patternType = 0;
+    P.toneMeasure = 0;
+    P.pivot = 0.42f;
+    P.toneFloor = 0.40f;
+    P.toneCeil = 0.72f;
+    P.toneBias = 1.0f;
+    P.toneSoft = 0.015f;
+    P.shadowLevel = 0.03f;
+    P.shadowSoft = 0.015f;
+    P.shadowR = 0.10f;
+    P.shadowG = 0.02f;
+    P.shadowB = 0.05f;
+    P.hiLevel = 0.97f;
+    P.hiSoft = 0.015f;
+    P.hiColorKeep = 0.15f;
+    P.hueShift = 0.0f;
+    P.hueSteps = 12;
+    P.hueSnap = 0.8f;
+    P.satSteps = 3;
+    P.stepSoft = 0.1f;
+    P.monoHue = 35.0f;
+    P.monoSat = 0.25f;
+    P.accentHue = 0.0f;
+    P.accentWidth = 25.0f;
+    P.accentRest = 0.0f;
+    P.tintHue = 45.0f;
+    P.tintAmt = 0.0f;
+    P.lineStrength = 1.0f;
+    P.lineSoft = 0.5f;
+    P.lineColor = 0;
+    P.lineLitOnly = 0;
+    P.linePreSmooth = 1;
+    P.patternRange = 0.10f;
+    P.patternSize = 8.0f;
+    P.patternAngle = 45.0f;
+    P.flatSpread = 1.0f;
+    P.flatSharp = 16.0f;
+    P.stabColor = 0.3f;
+    P.stabRadius = 6.0f;
+    P.outBlack = 0.0f;
+    P.outWhite = 1.0f;
+    P.outSat = 1.0f;
+    return P;
+}
+
+// === BUILT-IN PRESETS: defaults plus the listed changes ======================
+
+// Killer7 Classic
+__DEVICE__ Cfg presetK7() {
+    Cfg P = cfgDefaults();
+    return P;
+}
+
+// Stark Noir
+__DEVICE__ Cfg presetNoir() {
+    Cfg P = cfgDefaults();
+    P.colorMode = 1;
+    P.monoSat = 0.0f;
+    P.tones = 1;
+    P.shadowThresh = 0.36f;
+    P.contrast = 1.6f;
+    P.toneFloor = 0.62f;
+    P.toneCeil = 0.62f;
+    P.shadowLevel = 0.0f;
+    P.lineColor = 1;
+    P.hiAmount = 0.6f;
+    return P;
+}
+
+// Crimson Ink
+__DEVICE__ Cfg presetCrimson() {
+    Cfg P = cfgDefaults();
+    P.shadowStyle = 2;
+    P.shadowLevel = 0.10f;
+    P.colorMode = 2;
+    P.accentHue = 0.0f;
+    P.accentWidth = 30.0f;
+    P.accentRest = 0.12f;
+    P.satAmt = 1.6f;
+    P.contrast = 1.4f;
+    return P;
+}
+
+// Halftone Comic
+__DEVICE__ Cfg presetComic() {
+    Cfg P = cfgDefaults();
+    P.tones = 3;
+    P.satAmt = 1.6f;
+    P.hueSteps = 8;
+    P.hueSnap = 1.0f;
+    P.patternType = 1;
+    P.patternRange = 0.15f;
+    P.patternSize = 7.0f;
+    P.lineWidth = 1.5f;
+    P.toneFloor = 0.35f;
+    P.toneCeil = 0.85f;
+    return P;
+}
+
+// Pen and Ink
+__DEVICE__ Cfg presetPen() {
+    Cfg P = cfgDefaults();
+    P.colorMode = 1;
+    P.monoHue = 40.0f;
+    P.monoSat = 0.08f;
+    P.tones = 3;
+    P.patternType = 3;
+    P.patternRange = 0.18f;
+    P.patternSize = 6.0f;
+    P.toneFloor = 0.55f;
+    P.toneCeil = 0.95f;
+    P.lineThresh = 0.08f;
+    P.lineColor = 1;
+    P.shadowLevel = 0.02f;
+    return P;
+}
+
+// Sepia Woodcut
+__DEVICE__ Cfg presetSepia() {
+    Cfg P = cfgDefaults();
+    P.colorMode = 1;
+    P.monoHue = 32.0f;
+    P.monoSat = 0.35f;
+    P.patternType = 2;
+    P.patternAngle = 30.0f;
+    P.patternSize = 5.0f;
+    P.contrast = 1.5f;
+    P.shadowLevel = 0.06f;
+    return P;
+}
+
+// Navy Night
+__DEVICE__ Cfg presetNavy() {
+    Cfg P = cfgDefaults();
+    P.shadowStyle = 3;
+    P.shadowLevel = 0.08f;
+    P.satAmt = 0.8f;
+    P.tintHue = 210.0f;
+    P.tintAmt = 0.35f;
+    P.highlightThresh = 0.92f;
+    P.toneCeil = 0.62f;
+    return P;
+}
+
+// Pop Palette
+__DEVICE__ Cfg presetPop() {
+    Cfg P = cfgDefaults();
+    P.tones = 4;
+    P.satAmt = 2.0f;
+    P.hueSteps = 6;
+    P.hueSnap = 1.0f;
+    P.satSteps = 2;
+    P.shadowStyle = 1;
+    P.shadowLevel = 0.08f;
+    P.toneFloor = 0.35f;
+    P.toneCeil = 0.85f;
+    return P;
+}
+
+// Soft Painted
+__DEVICE__ Cfg presetSoft() {
+    Cfg P = cfgDefaults();
+    P.tones = 3;
+    P.flatRadius = 3;
+    P.lineWidth = 0.8f;
+    P.lineStrength = 0.7f;
+    P.shadowStyle = 4;
+    P.shadowLevel = 0.15f;
+    P.stepSoft = 0.15f;
+    P.toneSoft = 0.03f;
+    P.shadowSoft = 0.03f;
+    return P;
+}
+
+// === USER PRESETS ===========================================================
+// Each slot is a full snapshot. Fill them with save_preset.py, or by hand:
+// copy a built-in preset's lines in, starting from  Cfg P = cfgDefaults();
+// Keep the @user begin/end marker lines - the save script looks for them.
+
+// @user 1 begin  - empty slot: returns the sliders unchanged
+__DEVICE__ Cfg userPreset1(Cfg P) {
+    return P;
+}
+// @user 1 end
+
+// @user 2 begin  - empty slot: returns the sliders unchanged
+__DEVICE__ Cfg userPreset2(Cfg P) {
+    return P;
+}
+// @user 2 end
+
+// @user 3 begin  - empty slot: returns the sliders unchanged
+__DEVICE__ Cfg userPreset3(Cfg P) {
+    return P;
+}
+// @user 3 end
+
+// @user 4 begin  - empty slot: returns the sliders unchanged
+__DEVICE__ Cfg userPreset4(Cfg P) {
+    return P;
+}
+// @user 4 end
+
+// @user 5 begin  - empty slot: returns the sliders unchanged
+__DEVICE__ Cfg userPreset5(Cfg P) {
+    return P;
+}
+// @user 5 end
+
+// @user 6 begin  - empty slot: returns the sliders unchanged
+__DEVICE__ Cfg userPreset6(Cfg P) {
+    return P;
+}
+// @user 6 end
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, __TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB)
 {
+    // Sliders, or the chosen preset in their place
+    Cfg P;
+    P.shadowThresh = shadowThresh;
+    P.shadowStyle = shadowStyle;
+    P.tones = tones;
+    P.contrast = contrast;
+    P.colorMode = colorMode;
+    P.satAmt = satAmt;
+    P.highlightThresh = highlightThresh;
+    P.hiAmount = hiAmount;
+    P.flatRadius = flatRadius;
+    P.stabTone = stabTone;
+    P.drawLines = drawLines;
+    P.lineThresh = lineThresh;
+    P.lineWidth = lineWidth;
+    P.patternType = patternType;
+    P.toneMeasure = toneMeasure;
+    P.pivot = pivot;
+    P.toneFloor = toneFloor;
+    P.toneCeil = toneCeil;
+    P.toneBias = toneBias;
+    P.toneSoft = toneSoft;
+    P.shadowLevel = shadowLevel;
+    P.shadowSoft = shadowSoft;
+    P.shadowR = shadowR;
+    P.shadowG = shadowG;
+    P.shadowB = shadowB;
+    P.hiLevel = hiLevel;
+    P.hiSoft = hiSoft;
+    P.hiColorKeep = hiColorKeep;
+    P.hueShift = hueShift;
+    P.hueSteps = hueSteps;
+    P.hueSnap = hueSnap;
+    P.satSteps = satSteps;
+    P.stepSoft = stepSoft;
+    P.monoHue = monoHue;
+    P.monoSat = monoSat;
+    P.accentHue = accentHue;
+    P.accentWidth = accentWidth;
+    P.accentRest = accentRest;
+    P.tintHue = tintHue;
+    P.tintAmt = tintAmt;
+    P.lineStrength = lineStrength;
+    P.lineSoft = lineSoft;
+    P.lineColor = lineColor;
+    P.lineLitOnly = lineLitOnly;
+    P.linePreSmooth = linePreSmooth;
+    P.patternRange = patternRange;
+    P.patternSize = patternSize;
+    P.patternAngle = patternAngle;
+    P.flatSpread = flatSpread;
+    P.flatSharp = flatSharp;
+    P.stabColor = stabColor;
+    P.stabRadius = stabRadius;
+    P.outBlack = outBlack;
+    P.outWhite = outWhite;
+    P.outSat = outSat;
+    if (preset == PR_K7) { P = presetK7(); }
+    else if (preset == PR_NOIR) { P = presetNoir(); }
+    else if (preset == PR_CRIMSON) { P = presetCrimson(); }
+    else if (preset == PR_COMIC) { P = presetComic(); }
+    else if (preset == PR_PEN) { P = presetPen(); }
+    else if (preset == PR_SEPIA) { P = presetSepia(); }
+    else if (preset == PR_NAVY) { P = presetNavy(); }
+    else if (preset == PR_POP) { P = presetPop(); }
+    else if (preset == PR_SOFT) { P = presetSoft(); }
+    else if (preset == PR_USER1) { P = userPreset1(P); }
+    else if (preset == PR_USER2) { P = userPreset2(P); }
+    else if (preset == PR_USER3) { P = userPreset3(P); }
+    else if (preset == PR_USER4) { P = userPreset4(P); }
+    else if (preset == PR_USER5) { P = userPreset5(P); }
+    else if (preset == PR_USER6) { P = userPreset6(P); }
+
     float3 src = fetch(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height);
 
     // Keep the look consistent between HD / UHD / etc.
     float resScale = (float)p_Width / 1920.0f;
-    int stride = (int)_fmaxf(1.0f, _floor(resScale * flatSpread + 0.5f));
+    int stride = (int)_fmaxf(1.0f, _floor(resScale * P.flatSpread + 0.5f));
 
     // 1. Flatten
-    float3 flat = flatRadius > 0
-        ? kuwahara(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height, flatRadius, stride, flatSharp)
+    float3 flat = P.flatRadius > 0
+        ? kuwahara(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height, P.flatRadius, stride, P.flatSharp)
         : src;
 
     // 1b. Stability reference: tone and colour decisions lean on a wide blur
     float3 stable = flat;
-    if (stabTone > 0.0f || stabColor > 0.0f) {
-        stable = stableBlur(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height, stabRadius * resScale);
+    if (P.stabTone > 0.0f || P.stabColor > 0.0f) {
+        stable = stableBlur(p_TexR, p_TexG, p_TexB, p_X, p_Y, p_Width, p_Height, P.stabRadius * resScale);
     }
-    float3 toneSrc  = lerp3(flat, stable, stabTone);
-    float3 colorSrc = lerp3(flat, stable, stabColor);
+    float3 toneSrc  = lerp3(flat, stable, P.stabTone);
+    float3 colorSrc = lerp3(flat, stable, P.stabColor);
     if (viewMode == VM_FLAT) return toneSrc;
 
-    // 2. Exposure / contrast on the chosen tone measure
-    int tmode = toneMeasure == TM_MAXRGB ? 1 : (toneMeasure == TM_AVERAGE ? 2 : 0);
+    // 2. Exposure / P.contrast on the chosen tone measure
+    int tmode = P.toneMeasure == TM_MAXRGB ? 1 : (P.toneMeasure == TM_AVERAGE ? 2 : 0);
     float expGain = _powf(2.0f, exposure);
     float Y = toneOf(toneSrc, tmode) * expGain;
-    Y = pivot * _powf(_fmaxf(Y, 0.0f) / pivot, contrast);
+    Y = P.pivot * _powf(_fmaxf(Y, 0.0f) / P.pivot, P.contrast);
     Y = _saturatef(Y);
 
     // 3. Shadow matte (1 = lit, 0 = shadow)
-    float litMask = sstep(shadowThresh - shadowSoft, shadowThresh + shadowSoft, Y);
+    float litMask = sstep(P.shadowThresh - P.shadowSoft, P.shadowThresh + P.shadowSoft, Y);
     if (viewMode == VM_SHADOW) return make_float3(litMask, litMask, litMask);
 
     // 5. Posterise the lit range into N equal-width bands with soft edges
-    float range = _fmaxf(highlightThresh - shadowThresh, 1e-3f);
-    float t = _powf(_saturatef((Y - shadowThresh) / range), toneBias);
+    float range = _fmaxf(P.highlightThresh - P.shadowThresh, 1e-3f);
+    float t = _powf(_saturatef((Y - P.shadowThresh) / range), P.toneBias);
     float qt = 0.5f;
-    if (tones > 1) {
-        float N = (float)tones;
+    if (P.tones > 1) {
+        float N = (float)P.tones;
         float v = t * N - 0.5f;
         float i = _floor(v);
         float fr = v - i;
-        float w = _fminf(_fmaxf(toneSoft * N / range, 1e-4f), 0.5f);
+        float w = _fminf(_fmaxf(P.toneSoft * N / range, 1e-4f), 0.5f);
         float level = i + sstep(0.5f - w, 0.5f + w, fr);
         level = _fminf(_fmaxf(level, 0.0f), N - 1.0f);
         qt = level / (N - 1.0f);
     }
-    float bandY = lerpf(toneFloor, toneCeil, qt);
+    float bandY = lerpf(P.toneFloor, P.toneCeil, qt);
 
     // 7. Colour
     float3 hsv = rgb2hsv(colorSrc);
-    float hue = wrap01(hsv.x + hueShift / 360.0f);
-    float sat = _saturatef(hsv.y * satAmt);
+    float hue = wrap01(hsv.x + P.hueShift / 360.0f);
+    float sat = _saturatef(hsv.y * P.satAmt);
 
-    if (colorMode == CM_MONO) {
-        hue = monoHue / 360.0f;
-        sat = monoSat;
+    if (P.colorMode == CM_MONO) {
+        hue = P.monoHue / 360.0f;
+        sat = P.monoSat;
     } else {
-        if (colorMode == CM_ACCENT) {
-            float d = hueDist(hue, accentHue / 360.0f);
-            float wdt = accentWidth / 360.0f;
+        if (P.colorMode == CM_ACCENT) {
+            float d = hueDist(hue, P.accentHue / 360.0f);
+            float wdt = P.accentWidth / 360.0f;
             float keep = 1.0f - sstep(wdt * 0.6f, wdt, d);
-            sat = sat * lerpf(accentRest, 1.0f, keep);
+            sat = sat * lerpf(P.accentRest, 1.0f, keep);
         }
-        if (hueSteps > 0) {
-            float hs = (float)hueSteps;
-            float hq = softQuant(hue, hs, stepSoft);
-            hue = wrap01(hue + (hq - hue) * hueSnap);
+        if (P.hueSteps > 0) {
+            float hs = (float)P.hueSteps;
+            float hq = softQuant(hue, hs, P.stepSoft);
+            hue = wrap01(hue + (hq - hue) * P.hueSnap);
         }
-        if (satSteps > 0) {
-            float ss = (float)satSteps;
-            sat = _saturatef(softQuant(sat, ss, stepSoft));
+        if (P.satSteps > 0) {
+            float ss = (float)P.satSteps;
+            sat = _saturatef(softQuant(sat, ss, P.stepSoft));
         }
     }
 
     float3 lit = colorize(hue, sat, bandY);
-    if (tintAmt > 0.0f) lit = lerp3(lit, colorize(tintHue / 360.0f, 1.0f, bandY), tintAmt);
+    if (P.tintAmt > 0.0f) lit = lerp3(lit, colorize(P.tintHue / 360.0f, 1.0f, bandY), P.tintAmt);
 
     // 3b. Shadow colour
     float3 shadowCol;
-    if (shadowStyle == SH_SOURCE)       shadowCol = colorize(hue, sat, shadowLevel);
-    else if (shadowStyle == SH_CRIMSON) shadowCol = colorize(0.985f, 0.9f, shadowLevel);
-    else if (shadowStyle == SH_NAVY)    shadowCol = colorize(0.62f,  0.8f, shadowLevel);
-    else if (shadowStyle == SH_VIOLET)  shadowCol = colorize(0.76f,  0.7f, shadowLevel);
-    else if (shadowStyle == SH_CUSTOM)  shadowCol = make_float3(shadowR, shadowG, shadowB);
-    else                                shadowCol = make_float3(shadowLevel, shadowLevel, shadowLevel);
+    if (P.shadowStyle == SH_SOURCE)       shadowCol = colorize(hue, sat, P.shadowLevel);
+    else if (P.shadowStyle == SH_CRIMSON) shadowCol = colorize(0.985f, 0.9f, P.shadowLevel);
+    else if (P.shadowStyle == SH_NAVY)    shadowCol = colorize(0.62f,  0.8f, P.shadowLevel);
+    else if (P.shadowStyle == SH_VIOLET)  shadowCol = colorize(0.76f,  0.7f, P.shadowLevel);
+    else if (P.shadowStyle == SH_CUSTOM)  shadowCol = make_float3(P.shadowR, P.shadowG, P.shadowB);
+    else                                shadowCol = make_float3(P.shadowLevel, P.shadowLevel, P.shadowLevel);
 
     // 4. Shadow pattern: lit marks inside the band just below the threshold
     float patMask = 0.0f;
-    if (patternType != PT_NONE && patternRange > 0.0f) {
-        int ptype = patternType == PT_HALFTONE ? 1 : (patternType == PT_HATCH ? 2 : 3);
-        float density = _saturatef((Y - (shadowThresh - patternRange)) / patternRange);
-        float cell = _fmaxf(patternSize * resScale, 1.0f);
-        patMask = shadePattern(ptype, (float)p_X, (float)p_Y, cell, patternAngle, density)
+    if (P.patternType != PT_NONE && P.patternRange > 0.0f) {
+        int ptype = P.patternType == PT_HALFTONE ? 1 : (P.patternType == PT_HATCH ? 2 : 3);
+        float density = _saturatef((Y - (P.shadowThresh - P.patternRange)) / P.patternRange);
+        float cell = _fmaxf(P.patternSize * resScale, 1.0f);
+        patMask = shadePattern(ptype, (float)p_X, (float)p_Y, cell, P.patternAngle, density)
                   * (density > 0.0f ? 1.0f : 0.0f) * (1.0f - litMask);
     }
-    float3 patCol = colorize(hue, sat, toneFloor);
-    if (tintAmt > 0.0f) patCol = lerp3(patCol, colorize(tintHue / 360.0f, 1.0f, toneFloor), tintAmt);
+    float3 patCol = colorize(hue, sat, P.toneFloor);
+    if (P.tintAmt > 0.0f) patCol = lerp3(patCol, colorize(P.tintHue / 360.0f, 1.0f, P.toneFloor), P.tintAmt);
 
     if (viewMode == VM_BANDS) {
-        float b = lerpf(shadowLevel, bandY, litMask);
-        b = lerpf(b, toneFloor, patMask);
+        float b = lerpf(P.shadowLevel, bandY, litMask);
+        b = lerpf(b, P.toneFloor, patMask);
         return make_float3(b, b, b);
     }
 
@@ -426,49 +800,49 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, __TEXTU
     col = lerp3(col, patCol, patMask);
 
     // 6. Highlight blowout
-    float hiMask = sstep(highlightThresh - hiSoft, highlightThresh + hiSoft, Y) * hiAmount;
-    float3 hiCol = colorize(hue, sat * hiColorKeep, hiLevel);
+    float hiMask = sstep(P.highlightThresh - P.hiSoft, P.highlightThresh + P.hiSoft, Y) * P.hiAmount;
+    float3 hiCol = colorize(hue, sat * P.hiColorKeep, P.hiLevel);
     col = lerp3(col, hiCol, hiMask);
 
     // 8. Ink outlines (Sobel on source)
     float lineMask = 0.0f;
-    if (drawLines || viewMode == VM_LINES) {
-        int d = (int)_fmaxf(1.0f, _floor(lineWidth * resScale + 0.5f));
+    if (P.drawLines || viewMode == VM_LINES) {
+        int d = (int)_fmaxf(1.0f, _floor(P.lineWidth * resScale + 0.5f));
         int x = p_X, y = p_Y, W = p_Width, H = p_Height;
         int s = (int)_fmaxf(1.0f, _floor(resScale + 0.5f));
-        float tl = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y - d, W, H, s, linePreSmooth, tmode);
-        float tc = edgeTap(p_TexR, p_TexG, p_TexB, x,     y - d, W, H, s, linePreSmooth, tmode);
-        float tr = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y - d, W, H, s, linePreSmooth, tmode);
-        float ml = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y,     W, H, s, linePreSmooth, tmode);
-        float mr = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y,     W, H, s, linePreSmooth, tmode);
-        float bl = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y + d, W, H, s, linePreSmooth, tmode);
-        float bc = edgeTap(p_TexR, p_TexG, p_TexB, x,     y + d, W, H, s, linePreSmooth, tmode);
-        float br = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y + d, W, H, s, linePreSmooth, tmode);
+        float tl = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y - d, W, H, s, P.linePreSmooth, tmode);
+        float tc = edgeTap(p_TexR, p_TexG, p_TexB, x,     y - d, W, H, s, P.linePreSmooth, tmode);
+        float tr = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y - d, W, H, s, P.linePreSmooth, tmode);
+        float ml = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y,     W, H, s, P.linePreSmooth, tmode);
+        float mr = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y,     W, H, s, P.linePreSmooth, tmode);
+        float bl = edgeTap(p_TexR, p_TexG, p_TexB, x - d, y + d, W, H, s, P.linePreSmooth, tmode);
+        float bc = edgeTap(p_TexR, p_TexG, p_TexB, x,     y + d, W, H, s, P.linePreSmooth, tmode);
+        float br = edgeTap(p_TexR, p_TexG, p_TexB, x + d, y + d, W, H, s, P.linePreSmooth, tmode);
         float gx = (tr + 2.0f * mr + br) - (tl + 2.0f * ml + bl);
         float gy = (bl + 2.0f * bc + br) - (tl + 2.0f * tc + tr);
         float mag = _sqrtf(gx * gx + gy * gy) * 0.25f * expGain;
-        lineMask = sstep(lineThresh, lineThresh * (1.0f + lineSoft) + 1e-4f, mag);
-        if (lineLitOnly) lineMask *= litMask;
+        lineMask = sstep(P.lineThresh, P.lineThresh * (1.0f + P.lineSoft) + 1e-4f, mag);
+        if (P.lineLitOnly) lineMask *= litMask;
     }
     if (viewMode == VM_LINES) return make_float3(1.0f - lineMask, 1.0f - lineMask, 1.0f - lineMask);
-    if (drawLines) {
+    if (P.drawLines) {
         float3 inkCol;
-        if (lineColor == LC_BLACK)       inkCol = make_float3(0.0f, 0.0f, 0.0f);
-        else if (lineColor == LC_WHITE)  inkCol = make_float3(1.0f, 1.0f, 1.0f);
-        else if (lineColor == LC_INVERT) inkCol = make_float3(1.0f - col.x, 1.0f - col.y, 1.0f - col.z);
+        if (P.lineColor == LC_BLACK)       inkCol = make_float3(0.0f, 0.0f, 0.0f);
+        else if (P.lineColor == LC_WHITE)  inkCol = make_float3(1.0f, 1.0f, 1.0f);
+        else if (P.lineColor == LC_INVERT) inkCol = make_float3(1.0f - col.x, 1.0f - col.y, 1.0f - col.z);
         else                             inkCol = shadowCol;
-        col = lerp3(col, inkCol, lineMask * lineStrength);
+        col = lerp3(col, inkCol, lineMask * P.lineStrength);
     }
 
     // 9. Output
-    if (outSat != 1.0f) {
+    if (P.outSat != 1.0f) {
         float l = luma(col);
-        col = make_float3(l + (col.x - l) * outSat, l + (col.y - l) * outSat, l + (col.z - l) * outSat);
+        col = make_float3(l + (col.x - l) * P.outSat, l + (col.y - l) * P.outSat, l + (col.z - l) * P.outSat);
     }
-    float span = outWhite - outBlack;
-    col = make_float3(outBlack + _saturatef(col.x) * span,
-                      outBlack + _saturatef(col.y) * span,
-                      outBlack + _saturatef(col.z) * span);
+    float span = P.outWhite - P.outBlack;
+    col = make_float3(P.outBlack + _saturatef(col.x) * span,
+                      P.outBlack + _saturatef(col.y) * span,
+                      P.outBlack + _saturatef(col.z) * span);
 
     return lerp3(src, col, mixAmt);
 }

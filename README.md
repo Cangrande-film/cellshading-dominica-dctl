@@ -59,11 +59,39 @@ Everything else sits under the **ADVANCED** sections (Tone, Shadow, Highlight, C
 Outline, Pattern, Flatten, Stability, Output). The checkboxes beside the section headers
 do nothing; they are only there to show the headers.
 
-### Starting points
+### Presets
 
-- **Classic Killer7:** Tone Count 1, Shadow Color Ink Black, Highlight Blowout 1, Tone Measure *Max RGB*.
-- **Comic shading:** Shadow Pattern *Halftone Dots*, Pattern Range 0.1, Pattern Cell Size about 8.
-- **Red accent:** Color Mode *Single Accent Color*, Color Accent Hue 0, Color Non-Accent Saturation 0.
+The **Preset** menu at the top picks a saved look. *Custom - Use Sliders* uses the sliders.
+Any other preset replaces every slider except **Exposure**, **Effect Mix** and **View**, which
+stay live so you can adjust each shot.
+
+Built-in presets: Killer7 Classic, Stark Noir, Crimson Ink, Halftone Comic, Pen and Ink,
+Sepia Woodcut, Navy Night, Pop Palette, Soft Painted.
+
+To tweak a preset, set the sliders to its values and switch to *Custom*. A DCTL can't move
+its own sliders.
+
+#### Saving your own
+
+There are six slots, *User 1* to *User 6*. An empty slot behaves like *Custom*. To fill one:
+
+1. Copy `preset-template.txt`, then type in the values from your DCTL panel. Delete any lines
+   you left at the default.
+2. Run
+
+   ```
+   python save_preset.py 1 --name "Red Room" --values my-look.txt
+   ```
+
+   This writes slot 1 into the .dctl, renames it in the menu and installs it into Resolve's
+   LUT folder (Windows).
+3. In Resolve, re-select the DCTL on the node to load the new version.
+
+To rename a slot, use `--name` on its own. To empty it, use `--clear`. Names may only contain
+letters, digits, spaces, `:` and `-`, because other characters crash Resolve's DCTL parser.
+
+To keep the whole node quickly without editing the file, right-click the viewer and choose
+**Grab Still**. Apply it to other clips from the Gallery. This also works for any setup.
 
 ## Performance
 
